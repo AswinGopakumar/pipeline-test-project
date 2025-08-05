@@ -1,5 +1,9 @@
 pipeline {
-  agent any
+   agent {
+    docker {
+      image 'node:16-alpine'
+    }
+  }
 
   environment {
     DOCKER_IMAGE = "aswingopakumar04/pipeline-test-project:${BUILD_TAG}"
