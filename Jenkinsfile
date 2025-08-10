@@ -1,16 +1,12 @@
 pipeline {
-   agent {
-    docker {
-      image 'node:16-alpine'
-    }
-  }
+  agent any
 
   environment {
     DOCKER_IMAGE = "aswingopakumar04/pipeline-test-project:${BUILD_TAG}"
   }
 
   triggers {
-    githubPush() // runs pipeline on every push
+    githubPush()
   }
 
   stages {
@@ -21,48 +17,46 @@ pipeline {
     }
 
     stage('Install Dependencies') {
+      agent {
+        docker {
+          image 'node:16-alpine'
+          args '-u root' // so we can install packages if needed
+        }
+      }
       steps {
+        sh 'apk add --no-cache git' // ensures git exists in container
         sh 'npm install'
       }
     }
 
     stage('Run Tests') {
+      agent {
+        docker {
+          image 'node:16-alpine'
+        }
+      }
       steps {
         sh 'npm test || echo "No tests yet"'
       }
     }
 
-    stage('Build Docker Image') {
+    stage('Build & Push Docker Image') {
       steps {
         sh "docker build -t ${DOCKER_IMAGE} ."
-      }
-    }
-
-    stage('Push Docker Image') {
-      steps {
-        withCredentials([string(credentialsId: 'docker-hub-token', variable: 'DOCKER_HUB_TOKEN')]) {
+        withCredentials([usernamePassword(credentialsId: 'DOCKER_HUB_TOKEN', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
           sh """
-            echo "$DOCKER_HUB_TOKEN" | docker login -u aswingopakumar04 --password-stdin
+            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
             docker push ${DOCKER_IMAGE}
           """
         }
       }
     }
 
-    stage('Update K8s Deployment') {
-      steps {
-        sh """
-          sed -i 's|image: .*|image: ${DOCKER_IMAGE}|' deployment.yaml
-        """
-      }
-    }
-
     stage('Deploy to Kubernetes') {
       steps {
-        sh """
-          kubectl apply -f deployment.yaml
-          kubectl apply -f service.yaml
-        """
+        sh "sed -i 's|image: .*|image: ${DOCKER_IMAGE}|' deployment.yaml"
+        sh 'kubectl apply -f deployment.yaml'
+        sh 'kubectl apply -f service.yaml'
       }
     }
   }
